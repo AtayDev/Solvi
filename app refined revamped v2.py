@@ -30,14 +30,15 @@ PLANNER_PROMPT = """As an expert chemical engineer, create a comprehensive plan 
 #E2: <toolname>[<input here, you can use #E1 to represent its expected output>]
 Continue until you have a comprehensive plan covering all aspects of the question.
 
-##Your Task##
+##Your Task## 
+
 Create an extensive, detailed plan to answer the following question in the context of chemical engineering: {question}
 
 Ensure your plan covers:
 1. Fundamental concepts
 2. Relevant equations and their derivations
 3. Interplay between different concepts
-6. Potential challenges or limitations
+4. Potential challenges or limitations
 
 ##Now Begin##
 """
@@ -84,7 +85,7 @@ class AIInterface:
         self.solver_model = ChatOpenAI(
             temperature=0.2,
             model="gpt-3.5-turbo-16k",  # Using GPT-4 for more detailed and accurate responses
-            max_tokens=2000,  # Increased to allow for longer outputs
+            max_tokens=3000,  # Increased to allow for longer outputs
         )
         self.file_db = None
         self.active_db = self.db
@@ -94,6 +95,45 @@ class AIInterface:
             length_function=len,
             separators=["\n\n", "\n", " ", ""]
         )
+        self.express_model = ChatOpenAI(
+            temperature=0.3,
+            model="gpt-3.5-turbo",
+            max_tokens=450,  # Limit to approximately 350 words
+        )
+
+
+    def generate_express_info(self, query_text: str) -> Tuple[str, str]:
+        # Prepare evidence from the Chroma database
+        evidence = self.prepare_evidence_express(query_text)
+        
+        express_prompt = f"""As an expert chemical engineer, provide a concise overview answering the following question in approximately 350 words:
+
+Question: {query_text}
+
+Use the following relevant information to support your answer:
+
+{evidence}
+
+Your response should:
+1. Briefly introduce the topic
+2. Highlight key concepts and their significance in chemical engineering
+3. Mention any relevant equations without going into derivations
+4. Conclude with the practical implications or applications
+- Use LaTeX for all equations (enclosed in $$ signs for inline equations and $$ for display equations)
+
+Ensure your answer is informative yet accessible to someone with a basic understanding of chemical engineering."""
+
+        response = self.express_model.predict(express_prompt)
+        
+        # Process any LaTeX equations in the response
+        processed_response = self.process_latex_equations(response)
+        
+        # Extract title (first line) and content (rest of the response)
+        lines = processed_response.split('\n')
+        title = lines[0].strip()
+        content = '\n'.join(lines[1:]).strip()
+        
+        return content, title
 
     def generate_plan(self, query_text: str) -> str:
         planner_prompt = ChatPromptTemplate.from_template(PLANNER_PROMPT)
@@ -101,7 +141,7 @@ class AIInterface:
         return self.planner_model.predict(prompt)
 
     def prepare_evidence(self, query_text: str) -> str:
-        results = self.active_db.similarity_search_with_relevance_scores(query_text, k=50)  # Increased from 30 to 50
+        results = self.active_db.similarity_search_with_relevance_scores(query_text, k=20)  # Increased from 30 to 50
         
         filtered_results = [r for r in results if r[1] >= 0.5]  # Lowered threshold to include more potentially relevant content
         sorted_results = sorted(filtered_results, key=lambda x: x[1], reverse=True)
@@ -109,6 +149,28 @@ class AIInterface:
         selected_chunks = []
         total_tokens = 0
         max_tokens = 4000  # Increased to allow for more comprehensive evidence
+        
+        for doc, score in sorted_results:
+            chunk_tokens = len(doc.page_content.split())
+            if total_tokens + chunk_tokens > max_tokens:
+                break
+            selected_chunks.append(doc.page_content)
+            total_tokens += chunk_tokens
+        
+        if not selected_chunks:
+            return None
+        
+        return "\n\n---\n\n".join(selected_chunks)
+    
+    def prepare_evidence_express(self, query_text: str) -> str:
+        results = self.active_db.similarity_search_with_relevance_scores(query_text, k=10)  # Increased from 30 to 50
+        
+        filtered_results = [r for r in results if r[1] >= 0.5]  # Lowered threshold to include more potentially relevant content
+        sorted_results = sorted(filtered_results, key=lambda x: x[1], reverse=True)
+        
+        selected_chunks = []
+        total_tokens = 0
+        max_tokens = 1000  # Increased to allow for more comprehensive evidence
         
         for doc, score in sorted_results:
             chunk_tokens = len(doc.page_content.split())

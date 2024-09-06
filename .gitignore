@@ -1,2 +1,4 @@
 # Ignore chroma db data
 chroma_jabran/
+chroma_Ayoub/
+.env
