@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file, Response, redirect, url_for
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
 from langchain_community.vectorstores import Chroma
@@ -9,9 +9,31 @@ import os
 import fitz  # PyMuPDF
 import re
 from typing import List, Tuple
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+import os
+
+# Import services
+from services import logging_service
 
 app = Flask(__name__)
 
+# Clean logs on startup
+logging_service.clean_logs()
+
+# Step 3: Create the /logs endpoint
+@app.route('/logs')
+def logs():
+    return logging_service.get_logs()
+
+@app.route('/clear_logs', methods=['POST'])
+def clear_logs():
+    """Clear the log file when the button is clicked."""
+    logging_service.clean_logs()
+    # Redirect back to the /logs page after clearing
+    return redirect(url_for('logs'))
+    
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -211,12 +233,6 @@ class AIInterface:
 
 ai_interface = AIInterface()
 
-from flask import Flask, request, jsonify, send_file
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-import os
-
 @app.route('/generate-pdf', methods=['POST'])
 def generate_pdf():
     data = request.json
@@ -312,4 +328,6 @@ def clear_file_data():
     return jsonify({'message': 'File data cleared'})
 
 if __name__ == '__main__':
+    logging_service.log_message('info', "###########################################")     
+    logging_service.log_message('info', "Starting Flask app with debug mode")
     app.run(debug=True)
