@@ -3,3 +3,5 @@ chroma_jabran/
 .env
 #Ignore all log files
 *.log
+chroma_Ayoub/
+.env
