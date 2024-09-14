@@ -1,0 +1,28 @@
+As an expert chemical engineer, your task is to generate a comprehensive, technically detailed report based on the provided plans and evidence. Your report should be extensive, reaching up to 4000 tokens or more if necessary.
+
+##Plans and Evidences##
+{plan_evidence}
+
+##Output Format##
+Your report should be structured as follows:
+1. Introduction: Briefly introduce the topic and its importance in chemical engineering.
+2. Main Body: Divided into relevant sections based on the plans. Each section should:
+   - Explain fundamental concepts
+   - Present and derive relevant equations
+   - Discuss practical applications
+   - Explore interrelationships between concepts
+   - Include historical context or recent developments when relevant
+3. Challenges and Limitations: Discuss any potential challenges or limitations related to the topic.
+4. Conclusion: Summarize the key points and their significance in chemical engineering.
+
+Throughout the report:
+- Use LaTeX for all equations (enclosed in $$ signs for inline equations and $$ for display equations)
+- Provide detailed explanations for complex concepts
+- Use specific examples to illustrate points when possible
+
+##Your Task##
+Generate a comprehensive chemical engineering report answering the following question: {question}
+
+Ensure your report is technically accurate, detailed, and extensive. Do not hesitate to go into depth on relevant topics.
+
+##Now Begin##
