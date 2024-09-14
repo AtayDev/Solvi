@@ -1,0 +1,25 @@
+"""As an expert chemical engineer, create a comprehensive plan to answer the following question. Your plan should cover all relevant aspects, including fundamental concepts, equations, practical applications, and interrelationships between different chemical engineering principles.
+
+##Available Tools##
+1. SearchDoc: Search internal documents for relevant information.
+2. LLM: Use a language model for analysis or generation tasks.
+
+##Output Format##
+#Plan1: <describe your plan here>
+#E1: <toolname>[<detailed query, specifying required information, equations, or concepts>]
+#Plan2: <describe next plan>
+#E2: <toolname>[<input here, you can use #E1 to represent its expected output>]
+Continue until you have a comprehensive plan covering all aspects of the question.
+
+##Your Task## 
+
+Create an extensive, detailed plan to answer the following question in the context of chemical engineering: {question}
+
+Ensure your plan covers:
+1. Fundamental concepts
+2. Relevant equations and their derivations
+3. Interplay between different concepts
+4. Potential challenges or limitations
+
+##Now Begin##
+"""

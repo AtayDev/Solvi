@@ -1,3 +1,4 @@
+# Import libraries
 from flask import Flask, render_template, request, jsonify, send_file, Response, redirect, url_for
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
@@ -14,286 +15,69 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 import os
 
+# Import classes
+from interfaces.ai_interface import AIInterface
+
 # Import services
 from services import logging_service
 
+# Import utils
+from utils.U1_FilesUtils import load_prompt_from_txt
+
+# Load environment variables
+load_dotenv()
+CHROMA_PATH = "chroma_Jabran"
+PLANNER_PROMPT = load_prompt_from_txt('prompts/planner_prompt.txt')
+SOLVER_PROMPT = load_prompt_from_txt('prompts/solver_prompt.txt')
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
 app = Flask(__name__)
 
-# Clean logs on startup
-logging_service.clean_logs()
+ai_interface = AIInterface(
+    chroma_path=CHROMA_PATH,                       # Path to the Chroma database
+    planner_prompt_txt=PLANNER_PROMPT,             # Custom planner prompt
+    solver_prompt_txt=SOLVER_PROMPT,               # Custom solver prompt             
+    planner_model_name="gpt-3.5-turbo-16k",        # Use GPT-4 instead of GPT-3.5
+    solver_model_name="gpt-3.5-turbo-16k",         # Solver model set to GPT-3.5-turbo
+    express_model_name="gpt-3.5-turbo",            # Express model set to GPT-3.5-turbo
+    planner_temp=0.7,                              # Higher temperature for planner (creativity)
+    solver_temp=0.2,                               # Lower temperature for solver (accuracy)
+    express_temp=0.3,                              # Express model with moderate temperature
+    planner_max_tokens=10000,                        # Increase token limit for planner model
+    solver_max_tokens=15000,                        # High token limit for solver model
+    express_max_tokens=500                         # Set token limit for express model
+)
 
 # Step 3: Create the /logs endpoint
 @app.route('/logs')
 def logs():
-    return logging_service.get_logs()
+    try:
+        return logging_service.get_logs()
+    except Exception as e:
+        logging_service.log_exception(e)
+        return  "An error occurred while retrieving logs.", 500
 
 @app.route('/clear_logs', methods=['POST'])
 def clear_logs():
     """Clear the log file when the button is clicked."""
-    logging_service.clean_logs()
-    # Redirect back to the /logs page after clearing
-    return redirect(url_for('logs'))
+    try:
+        logging_service.clean_logs()
+        # Redirect back to the /logs page after clearing
+        return redirect(url_for('logs'))
+    except Exception as e:
+        logging_service.log_exception(e)
+        return "An error occurred while clearing logs.", 500
     
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-CHROMA_PATH = "chroma_Jabran"
-
-PLANNER_PROMPT = """As an expert chemical engineer, create a comprehensive plan to answer the following question. Your plan should cover all relevant aspects, including fundamental concepts, equations, practical applications, and interrelationships between different chemical engineering principles.
-
-##Available Tools##
-1. SearchDoc: Search internal documents for relevant information.
-2. LLM: Use a language model for analysis or generation tasks.
-
-##Output Format##
-#Plan1: <describe your plan here>
-#E1: <toolname>[<detailed query, specifying required information, equations, or concepts>]
-#Plan2: <describe next plan>
-#E2: <toolname>[<input here, you can use #E1 to represent its expected output>]
-Continue until you have a comprehensive plan covering all aspects of the question.
-
-##Your Task## 
-
-Create an extensive, detailed plan to answer the following question in the context of chemical engineering: {question}
-
-Ensure your plan covers:
-1. Fundamental concepts
-2. Relevant equations and their derivations
-3. Interplay between different concepts
-4. Potential challenges or limitations
-
-##Now Begin##
-"""
-
-SOLVER_PROMPT = """As an expert chemical engineer, your task is to generate a comprehensive, technically detailed report based on the provided plans and evidence. Your report should be extensive, reaching up to 4000 tokens or more if necessary.
-
-##Plans and Evidences##
-{plan_evidence}
-
-##Output Format##
-Your report should be structured as follows:
-1. Introduction: Briefly introduce the topic and its importance in chemical engineering.
-2. Main Body: Divided into relevant sections based on the plans. Each section should:
-   - Explain fundamental concepts
-   - Present and derive relevant equations
-   - Discuss practical applications
-   - Explore interrelationships between concepts
-   - Include historical context or recent developments when relevant
-3. Challenges and Limitations: Discuss any potential challenges or limitations related to the topic.
-4. Conclusion: Summarize the key points and their significance in chemical engineering.
-
-Throughout the report:
-- Use LaTeX for all equations (enclosed in $$ signs for inline equations and $$ for display equations)
-- Provide detailed explanations for complex concepts
-- Use specific examples to illustrate points when possible
-
-##Your Task##
-Generate a comprehensive chemical engineering report answering the following question: {question}
-
-Ensure your report is technically accurate, detailed, and extensive. Do not hesitate to go into depth on relevant topics.
-
-##Now Begin##
-"""
-
-class AIInterface:
-    def __init__(self):
-        self.embedding_function = OpenAIEmbeddings()
-        self.db = Chroma(persist_directory=CHROMA_PATH, embedding_function=self.embedding_function)
-        self.planner_model = ChatOpenAI(
-            temperature=0.7,
-            model="gpt-3.5-turbo-16k",  # Using GPT-4 for more sophisticated planning
-            max_tokens=500,
-        )
-        self.solver_model = ChatOpenAI(
-            temperature=0.2,
-            model="gpt-3.5-turbo-16k",  # Using GPT-4 for more detailed and accurate responses
-            max_tokens=3000,  # Increased to allow for longer outputs
-        )
-        self.file_db = None
-        self.active_db = self.db
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            length_function=len,
-            separators=["\n\n", "\n", " ", ""]
-        )
-        self.express_model = ChatOpenAI(
-            temperature=0.3,
-            model="gpt-3.5-turbo",
-            max_tokens=450,  # Limit to approximately 350 words
-        )
-
-
-    def generate_express_info(self, query_text: str) -> Tuple[str, str]:
-        # Prepare evidence from the Chroma database
-        evidence = self.prepare_evidence_express(query_text)
-        
-        express_prompt = f"""As an expert chemical engineer, provide a concise overview answering the following question in approximately 350 words:
-
-Question: {query_text}
-
-Use the following relevant information to support your answer:
-
-{evidence}
-
-Your response should:
-1. Briefly introduce the topic
-2. Highlight key concepts and their significance in chemical engineering
-3. Mention any relevant equations without going into derivations
-4. Conclude with the practical implications or applications
-- Use LaTeX for all equations (enclosed in $$ signs for inline equations and $$ for display equations)
-
-Ensure your answer is informative yet accessible to someone with a basic understanding of chemical engineering."""
-
-        response = self.express_model.predict(express_prompt)
-        
-        # Process any LaTeX equations in the response
-        processed_response = self.process_latex_equations(response)
-        
-        # Extract title (first line) and content (rest of the response)
-        lines = processed_response.split('\n')
-        title = lines[0].strip()
-        content = '\n'.join(lines[1:]).strip()
-        
-        return content, title
-
-    def generate_plan(self, query_text: str) -> str:
-        planner_prompt = ChatPromptTemplate.from_template(PLANNER_PROMPT)
-        prompt = planner_prompt.format(question=query_text)
-        return self.planner_model.predict(prompt)
-
-    def prepare_evidence(self, query_text: str) -> str:
-        results = self.active_db.similarity_search_with_relevance_scores(query_text, k=20)  # Increased from 30 to 50
-        
-        filtered_results = [r for r in results if r[1] >= 0.5]  # Lowered threshold to include more potentially relevant content
-        sorted_results = sorted(filtered_results, key=lambda x: x[1], reverse=True)
-        
-        selected_chunks = []
-        total_tokens = 0
-        max_tokens = 4000  # Increased to allow for more comprehensive evidence
-        
-        for doc, score in sorted_results:
-            chunk_tokens = len(doc.page_content.split())
-            if total_tokens + chunk_tokens > max_tokens:
-                break
-            selected_chunks.append(doc.page_content)
-            total_tokens += chunk_tokens
-        
-        if not selected_chunks:
-            return None
-        
-        return "\n\n---\n\n".join(selected_chunks)
+@app.route('/logs/data')
+def get_log_data():
+    try:
+        # Just call the logging service to return raw log data
+        return logging_service.get_logs_data()
+    except Exception as e:
+        logging_service.log_exception(e)
+        return "An error occurred while retrieving logs.", 500
     
-    def prepare_evidence_express(self, query_text: str) -> str:
-        results = self.active_db.similarity_search_with_relevance_scores(query_text, k=10)  # Increased from 30 to 50
-        
-        filtered_results = [r for r in results if r[1] >= 0.5]  # Lowered threshold to include more potentially relevant content
-        sorted_results = sorted(filtered_results, key=lambda x: x[1], reverse=True)
-        
-        selected_chunks = []
-        total_tokens = 0
-        max_tokens = 1000  # Increased to allow for more comprehensive evidence
-        
-        for doc, score in sorted_results:
-            chunk_tokens = len(doc.page_content.split())
-            if total_tokens + chunk_tokens > max_tokens:
-                break
-            selected_chunks.append(doc.page_content)
-            total_tokens += chunk_tokens
-        
-        if not selected_chunks:
-            return None
-        
-        return "\n\n---\n\n".join(selected_chunks)
 
-    def execute_plan(self, plan: str, query_text: str) -> str:
-        steps = plan.split('\n')
-        evidences = []
-        for step in steps:
-            if step.startswith('#E'):
-                tool, query = step.split('[', 1)
-                query = query.rstrip(']')
-                if 'SearchDoc' in tool:
-                    evidence = self.prepare_evidence(query)
-                elif 'LLM' in tool:
-                    evidence = self.use_llm(query)
-                evidences.append(f"{step}\n{evidence}")
-        
-        plan_evidence = '\n\n'.join(evidences)
-        solver_prompt = ChatPromptTemplate.from_template(SOLVER_PROMPT)
-        prompt = solver_prompt.format(plan_evidence=plan_evidence, question=query_text)
-        return self.solver_model.predict(prompt)
-
-    def use_llm(self, query: str) -> str:
-        return self.solver_model.predict(query)
-
-    def generate_detailed_report(self, query_text: str) -> Tuple[str, str]:
-        plan = self.generate_plan(query_text)
-        print(plan)
-        response = self.execute_plan(plan, query_text)
-        processed_response = self.process_latex_equations(response)
-        
-        lines = processed_response.split('\n')
-        title = lines[0].strip()
-        content = '\n'.join(lines[1:]).strip()
-        
-        word_count = len(content.split())
-        if word_count < 500:  # Increased minimum word count
-            return f"The generated report does not meet the minimum word count requirement. Current word count: {word_count}. Please try again or refine your query.", "Insufficient Content"
-        
-        return content, title
-
-    def process_latex_equations(self, text: str) -> str:
-        def replace_equation(match):
-            latex_eq = match.group(1).strip()
-            is_inline = not ('\n' in latex_eq or '\\begin{' in latex_eq or '\\end{' in latex_eq)
-            
-            if is_inline:
-                return f'<span class="inline-equation"><img src="https://latex.codecogs.com/svg.latex?{latex_eq}" alt="{latex_eq}" style="vertical-align: middle;"></span>'
-            else:
-                return f'<div class="display-equation"><img src="https://latex.codecogs.com/svg.latex?{latex_eq}" alt="{latex_eq}"></div>'
-
-        # Process all LaTeX equations (both inline and display)
-        text = re.sub(r'\$\$(.*?)\$\$', replace_equation, text, flags=re.DOTALL)
-        text = re.sub(r'\$(.*?)\$', replace_equation, text)
-
-        # Wrap non-equation text in paragraph tags
-        paragraphs = text.split('\n')
-        processed_paragraphs = []
-        for paragraph in paragraphs:
-            if not paragraph.strip().startswith('<div class="display-equation">'):
-                paragraph = f'<p>{paragraph}</p>'
-            processed_paragraphs.append(paragraph)
-
-        return '\n'.join(processed_paragraphs)
-
-    def process_file(self, file_path: str):
-        if file_path.endswith('.pdf'):
-            text = self.extract_text_from_pdf(file_path)
-        elif file_path.endswith('.txt'):
-            with open(file_path, 'r') as file:
-                text = file.read()
-        else:
-            raise ValueError("Unsupported file type")
-
-        chunks = self.text_splitter.split_text(text)
-        self.file_db = Chroma.from_texts(chunks, self.embedding_function)
-        self.active_db = self.file_db
-
-    @staticmethod
-    def extract_text_from_pdf(file_path: str) -> str:
-        pdf_document = fitz.open(file_path)
-        text = ""
-        for page in pdf_document:
-            text += page.get_text()
-        return text
-
-    def clear_file_data(self):
-        self.file_db = None
-        self.active_db = self.db
-
-
-ai_interface = AIInterface()
 
 @app.route('/generate-pdf', methods=['POST'])
 def generate_pdf():
@@ -352,7 +136,12 @@ def generate_pdf():
 
 @app.route('/')
 def index():
-    return render_template('indexios.html')
+    try:
+        logging_service.log_message("info", "Home route accesssed")
+        return render_template('indexios.html')
+    except Exception as e:
+        logging_service.log_exception(e)
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/query', methods=['POST'])
 def query():
@@ -390,6 +179,11 @@ def clear_file_data():
     return jsonify({'message': 'File data cleared'})
 
 if __name__ == '__main__':
-    logging_service.log_message('info', "###########################################")     
-    logging_service.log_message('info', "Starting Flask app with debug mode")
-    app.run(debug=True)
+    try:
+        # Clean logs on startup
+        logging_service.clean_logs()
+        logging_service.log_message('info', "###########################################")     
+        logging_service.log_message('info', "Starting Flask app with debug mode")
+        app.run(debug=True)
+    except Exception as e:
+        logging_service.log_exception(e)
